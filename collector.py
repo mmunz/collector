@@ -13,26 +13,25 @@
 
 __author__="soma"
 __date__ ="$10.04.2014 20:15:00$"
-__version__="0.0.1"
+__version__="0.0.2"
 
 import os
 import json
 import subprocess
 import glob
 
+
+
 ### variables start
 
 # path to the rrd files
 path = "/var/lib/collectd/rrd"
 # output path for generated json
-outdir = "/var/www/CGP/json/"
+outdir = "/tmp/json/"
 # set to true to enable debug output
 debug = False
 
 ### variables end 
-
-hosts = []
-outLatest = {}
 
 def getHosts():
     for filename in os.listdir(path):
@@ -185,7 +184,6 @@ def latestData(out):
             for instance in out[host][plugin]['data']:
                 if isinstance(out[host][plugin]['data'][instance], list):
                     #outLatest[host][plugin][instance]
-                    i = 0
                     for v in out[host][plugin]['data'][instance]:
                         if isinstance(v, (int, float)):
                             outLatest[host][plugin][instance] = formatValue(v, plugin)
@@ -194,16 +192,44 @@ def latestData(out):
                 else:
                     outLatest[host][plugin][instance] = {}
                     for ds in out[host][plugin]['data'][instance]:
-                        i = 0
                         
                         for v in out[host][plugin]['data'][instance][ds]:
                             if isinstance(v, (int, float)):
                                 outLatest[host][plugin][instance][ds] = formatValue(v, plugin)
                                 break
-    
+
+def summary(out, plugins):
+    for host in out:
+        for plugin in out[host]:
+            if plugin in plugins:
+                
+                if not plugin in outSummary:
+                 outSummary[plugin] = {} 
+
+
+                for instance in out[host][plugin]:
+
+                    if isinstance(out[host][plugin][instance], dict):
+                        for v in out[host][plugin][instance]:
+                            if not v in outSummary[plugin]:
+                                outSummary[plugin][v] = 0
+                            print out[host][plugin][instance][v]
+                            outSummary[plugin][v] = int(outSummary[plugin][v]) + int(out[host][plugin][instance][v])
+                    else:
+                        if not instance in outSummary[plugin]:
+                            outSummary[plugin][instance] = 0
+                        if isinstance(out[host][plugin][instance], (int, float)):
+
+                            outSummary[plugin][instance] = outSummary[plugin][instance] + out[host][plugin][instance]            
+
 
 if __name__ == "__main__":
+    hosts = []
     out = {}
+    outLatest = {}
+    outSummary = {}
+    
+    
     getHosts()
     
     getData('splash_leases', 'splash_leases/splash_leases.rrd', ['leased', 'whitelisted', 'blacklisted'] )
@@ -212,7 +238,15 @@ if __name__ == "__main__":
     getData('interface', None, 'if_octets')
     
     latestData(out)
+    summary(outLatest, ['splash_leases', 'interface'])
+    
+    print(outSummary)
+    
+    outLatestPlusSummary = {}
+    outLatestPlusSummary['data'] = outLatest;
+    outLatestPlusSummary['summary'] = outSummary
   
     writeFile('all.json', json.dumps(out, indent = 4))
-    writeFile('latest.json', json.dumps(outLatest, indent = 4))
+    writeFile('latest.json', json.dumps(outLatestPlusSummary, indent = 4))
+    writeFile('summary.json', json.dumps(outSummary))
 
