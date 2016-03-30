@@ -1,0 +1,10 @@
+# path to the rrdtool binary
+rrdtoolBinary = "/usr/bin/rrdtool"
+# path to the rrd files
+path = "/var/lib/collectd/rrd"
+# path where the summary rrd files will be written
+summaryPath = "/var/lib/collectd/rrd-summary"
+# output path for generated json
+outdir = "/var/www/monitoring/json/"
+# set to True to enable debug output
+debug = false

@@ -13,25 +13,20 @@
 
 __author__="soma"
 __date__ ="$10.04.2014 20:15:00$"
-__version__="0.0.2"
+__version__="0.0.3"
+
 
 import os
 import json
 import subprocess
 import glob
-
-
-
-### variables start
-
-# path to the rrd files
-path = "/var/lib/collectd/rrd"
-# output path for generated json
-outdir = "/tmp/json/"
-# set to true to enable debug output
-debug = False
-
-### variables end 
+from rrdtool import update as rrd_update
+try:
+    from collections import OrderedDict as odict
+except ImportError:
+    from ordereddict import OrderedDict as odict
+    
+from config import *
 
 def getHosts():
     for filename in os.listdir(path):
@@ -40,7 +35,7 @@ def getHosts():
 
 def createRRD(key, source, datasources):
     RRD = ''
-    #hosts = ['megaradio']
+    #hosts = ['bg23wozi']
     if not source:
         # no source given - find all datasources for the given key
         if key == 'interface':
@@ -91,17 +86,50 @@ def createRRD(key, source, datasources):
                 for ds in datasources:
                     id = host.replace('.', 'DOTSNOTALLOWED') + '_' + ds
                     RRD += 'DEF:last_%s_raw=%s:%s:AVERAGE:step=30 ' % (id, file, ds)
-                    RRD += 'CDEF:last_%s=last_%s_raw ' % (id, id)
-                    RRD += 'XPORT:last_%s:%s ' % (id, id)
+                    #RRD += 'CDEF:last_%s=last_%s_raw ' % (id, id)
+                    RRD += 'XPORT:last_%s_raw:%s ' % (id, id)
     if debug:
         print(RRD)
     return RRD
 
 
+def createAggregatedRRDPath():
+    aggregatedPath = path + '/aggregated'
+    try:
+        os.makedirs(aggregatedPath)
+    except OSError as exception:
+        if exception.errno != errno.EEXIST:
+            raise
+        
+def createRRDAggregated(plugin, ds, filename):
+    interfaceTotals = aggregatedPath + '/' + plugin + '-total' + '/' + filename
+    if not os.path.exists(interfaceTotals):
+        # todo: well, do something
+        pass
+        
+
+def updateSummaryRRD():
+    for plugin in outSummary:
+        file = os.path.join(summaryPath, "summary/" + plugin + "/" + plugin + ".rrd")
+        if os.path.exists(file):
+            pluginValues = outSummary[plugin]
+            values = pluginValues.values()
+            updateValues = ':'.join(str(v) for v in values)
+            if len(updateValues) > 0:
+                try:
+                    ret = rrd_update(file, 'N:%s' % updateValues)
+                    if ret:
+                        print(ret)
+                    if debug: 
+                        print("Updated rrd %s with values: %s" % (plugin, updateValues))
+                except IOError:
+                    print("Could not write to %s" % file)
+             
+
 def getJsonRaw(RRD, plugin):
-    flush = '/usr/bin/collectdctl -s /var/run/collectd-unixsock flush plugin=%s' % plugin
-    os.system(flush)
-    cmd = '/opt/rrdtool-1.4.8/bin/rrdtool xport -s now-630s -e now-30s --json \\' + RRD + '\n'
+    #flush = '/usr/bin/collectdctl -s /var/run/collectd-unixsock flush plugin=%s' % plugin
+    #os.system(flush)
+    cmd = rrdtoolBinary + ' xport -s now-600s -e -1 --json \\' + RRD + '\n'
     op = subprocess.Popen([cmd, ""], stdout=subprocess.PIPE, shell=True)
     json, err = op.communicate()
     # rrdtool 1.4.8 still produces invalid json, fix it here
@@ -124,23 +152,23 @@ def parseData(key, data):
         ds = harr[1]
         h = harr[0]
         if not h in out:
-            out[h] = {}
+            out[h] = odict()
 
         meta = data['meta']
         meta.pop('legend', None)
         if not key in out[h]:
-            out[h][key] = {}
+            out[h][key] = odict()
         
         out[h][key]['meta'] = meta
         
         if not 'data' in out[h][key]:
-            out[h][key]['data'] = {}
+            out[h][key]['data'] = odict()
         if not instance:
             if not ds in out[h][key]['data']:
                 out[h][key]['data'][ds] = []
         else:
             if not ds in out[h][key]['data']:
-                out[h][key]['data'][ds] = {}
+                out[h][key]['data'][ds] = odict()
             if not instance in out[h][key]['data'][ds]:
                 out[h][key]['data'][ds][instance] = []        
                  
@@ -150,8 +178,6 @@ def parseData(key, data):
             else:
                 out[h][key]['data'][ds][instance].insert(0, data['data'][j][i])
         i = i + 1
-        
-    #return ret
 
 def getData(key, rra, datasources ):
     RRD = createRRD(key, rra, datasources);
@@ -178,9 +204,9 @@ def formatValue(value, plugin):
 
 def latestData(out):
     for host in out:
-        outLatest[host] = {}
+        outLatest[host] = odict()
         for plugin in out[host]:
-            outLatest[host][plugin] = {}
+            outLatest[host][plugin] = odict()
             for instance in out[host][plugin]['data']:
                 if isinstance(out[host][plugin]['data'][instance], list):
                     #outLatest[host][plugin][instance]
@@ -190,7 +216,7 @@ def latestData(out):
                             break
                             
                 else:
-                    outLatest[host][plugin][instance] = {}
+                    outLatest[host][plugin][instance] = odict()
                     for ds in out[host][plugin]['data'][instance]:
                         
                         for v in out[host][plugin]['data'][instance][ds]:
@@ -202,32 +228,27 @@ def summary(out, plugins):
     for host in out:
         for plugin in out[host]:
             if plugin in plugins:
-                
                 if not plugin in outSummary:
-                 outSummary[plugin] = {} 
+                    outSummary[plugin] = odict() 
 
-
+                
                 for instance in out[host][plugin]:
-
                     if isinstance(out[host][plugin][instance], dict):
                         for v in out[host][plugin][instance]:
                             if not v in outSummary[plugin]:
                                 outSummary[plugin][v] = 0
-                            print out[host][plugin][instance][v]
                             outSummary[plugin][v] = int(outSummary[plugin][v]) + int(out[host][plugin][instance][v])
                     else:
                         if not instance in outSummary[plugin]:
                             outSummary[plugin][instance] = 0
                         if isinstance(out[host][plugin][instance], (int, float)):
-
-                            outSummary[plugin][instance] = outSummary[plugin][instance] + out[host][plugin][instance]            
-
+                            outSummary[plugin][instance] = outSummary[plugin][instance] + out[host][plugin][instance]
 
 if __name__ == "__main__":
     hosts = []
-    out = {}
-    outLatest = {}
-    outSummary = {}
+    out = odict()
+    outLatest = odict()
+    outSummary = odict()
     
     
     getHosts()
@@ -239,10 +260,10 @@ if __name__ == "__main__":
     
     latestData(out)
     summary(outLatest, ['splash_leases', 'interface'])
+    updateSummaryRRD()
     
-    print(outSummary)
     
-    outLatestPlusSummary = {}
+    outLatestPlusSummary = odict()
     outLatestPlusSummary['data'] = outLatest;
     outLatestPlusSummary['summary'] = outSummary
   
