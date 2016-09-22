@@ -111,15 +111,21 @@ def createRRDAggregated(plugin, ds, filename):
 def updateSummaryRRD():
     for plugin in outSummary:
         file = os.path.join(summaryPath, "summary/" + plugin + "/" + plugin + ".rrd")
+	if plugin == "interface":
+	    # /var/lib/collectd/rrd-summary/summary/interface-summary/if_octets.rrd
+            file = os.path.join(summaryPath, "summary/interface-summary/if_octets.rrd")
+
         if os.path.exists(file):
             pluginValues = outSummary[plugin]
             values = pluginValues.values()
             updateValues = ':'.join(str(v) for v in values)
+
             if len(updateValues) > 0:
                 try:
                     ret = rrd_update(file, 'N:%s' % updateValues)
                     if ret:
                         print(ret)
+                        # print("Updated rrd %s with values: %s" % (plugin, updateValues))
                     if debug: 
                         print("Updated rrd %s with values: %s" % (plugin, updateValues))
                 except IOError:
@@ -172,7 +178,7 @@ def parseData(key, data):
             if not instance in out[h][key]['data'][ds]:
                 out[h][key]['data'][ds][instance] = []        
                  
-        for j in range(0, 21):
+        for j in range(0, len(data['data'])):
             if not instance:
                 out[h][key]['data'][ds].insert(0, data['data'][j][i])
             else:
@@ -271,3 +277,4 @@ if __name__ == "__main__":
     writeFile('latest.json', json.dumps(outLatestPlusSummary, indent = 4))
     writeFile('summary.json', json.dumps(outSummary))
 
+    print(outSummary)
